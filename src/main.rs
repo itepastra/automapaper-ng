@@ -91,12 +91,18 @@ fn main() {
     let layer_shell = LayerShell::bind(&globals, &qh).expect("layer shell unavailable");
 
     let wl_surface = compositor.create_surface(&qh);
-    let layer =
-        layer_shell.create_layer_surface(&qh, wl_surface, Layer::Bottom, Some("wgpu-layer"), None);
+    let layer = layer_shell.create_layer_surface(
+        &qh,
+        wl_surface,
+        Layer::Background,
+        Some("wgpu-layer"),
+        None,
+    );
 
     layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
     layer.set_keyboard_interactivity(KeyboardInteractivity::None);
     layer.set_size(0, 0); // let compositor decide full output size
+    layer.set_exclusive_zone(-1);
     layer.commit();
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
