@@ -1,1 +1,93 @@
+use std::{
+    fs::{create_dir_all, read_to_string, File},
+    io::Write,
+    path::PathBuf,
+    process,
+};
 
+use serde::{Deserialize, Serialize};
+
+use crate::uniform::UniformValue;
+
+#[derive(Serialize, Deserialize)]
+pub struct Config {
+    init_shader_path: PathBuf,
+    state_shader_path: PathBuf,
+    display_shader_path: PathBuf,
+
+    c1: UniformValue,
+    c2: UniformValue,
+    c3: UniformValue,
+    c4: UniformValue,
+}
+
+fn get_config_dir() -> PathBuf {
+    let mut config_file = dirs::config_dir().unwrap();
+    config_file.push("automapaper-ng");
+    return config_file;
+}
+
+fn true_path(path: &PathBuf) -> PathBuf {
+    let abs_path = if path.is_relative() {
+        &get_config_dir().join(path)
+    } else {
+        path
+    };
+
+    if !abs_path.exists() {
+        println!("path {abs_path:?} does not exist");
+        process::exit(3);
+    }
+
+    let can_path = abs_path.canonicalize().unwrap();
+    return can_path;
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            init_shader_path: PathBuf::from("./init.glsl"),
+            state_shader_path: PathBuf::from("./state.glsl"),
+            display_shader_path: PathBuf::from("./display.glsl"),
+
+            c1: UniformValue::ColorRgb([1., 0., 0.]),
+            c2: UniformValue::ColorRgb([0., 1., 0.]),
+            c3: UniformValue::ColorRgb([0., 0., 1.]),
+            c4: UniformValue::ColorRgb([1., 1., 1.]),
+        }
+    }
+}
+
+impl Config {
+    pub fn get_init_path(&self) -> PathBuf {
+        true_path(&self.init_shader_path)
+    }
+    pub fn get_state_path(&self) -> PathBuf {
+        true_path(&self.state_shader_path)
+    }
+    pub fn get_display_path(&self) -> PathBuf {
+        true_path(&self.display_shader_path)
+    }
+}
+
+pub fn get_config() -> Config {
+    let mut config_file = get_config_dir();
+    config_file.push("config.toml");
+
+    if !config_file.exists() {
+        println!("The file {config_file:?} does not exist");
+        // initialise the default config file
+        create_dir_all(config_file.parent().unwrap()).unwrap();
+        let mut f = File::create(config_file).unwrap();
+        f.write_all(
+            toml::to_string_pretty(&Config::default())
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        return Config::default();
+    }
+    println!("The file {config_file:?} does exist");
+
+    return toml::from_str(&read_to_string(config_file).unwrap()).unwrap();
+}
