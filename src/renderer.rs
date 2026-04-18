@@ -20,7 +20,7 @@ use std::{
     fs::{self, read_to_string},
     num::NonZeroU32,
     ptr::NonNull,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::mpsc::{self, Receiver},
     time::Instant,
 };
 use wayland_client::{
@@ -52,6 +52,8 @@ void main() {
 "#;
 
 const STATE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+const STATE_WIDTH: u32 = 160;
+const STATE_HEIGHT: u32 = 100;
 
 pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
     let conn = Connection::connect_to_env().expect("failed to connect to Wayland");
@@ -137,28 +139,22 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
         mapped_at_creation: false,
     });
 
-    let state_shader = read_to_string(config.get_state_path()).unwrap();
-    let display_shader = read_to_string(config.get_display_path()).unwrap();
+    let state_shader =
+        read_to_string(config.get_state_path()).expect("failed to read state shader");
+    let display_shader =
+        read_to_string(config.get_display_path()).expect("failed to read display shader");
 
     let bind_group_layout = create_state_bind_group_layout(&device);
     let pipeline_layout = create_pipeline_layout(&device, &bind_group_layout);
-
     let state_sampler = create_state_sampler(&device);
 
-    let (state_a, state_a_view) = create_state_texture(&device, 160, 100, "state a");
-    let (state_b, state_b_view) = create_state_texture(&device, 160, 100, "state b");
+    let (state_a, state_a_view) =
+        create_state_texture(&device, STATE_WIDTH, STATE_HEIGHT, "state a");
+    let (state_b, state_b_view) =
+        create_state_texture(&device, STATE_WIDTH, STATE_HEIGHT, "state b");
 
-    randomize_state_texture(&queue, &state_a, 160, 100);
-    randomize_state_texture(&queue, &state_b, 160, 100);
-
-    let bind_group_a = create_bind_group(
-        &device,
-        &bind_group_layout,
-        &uniform_buf,
-        &state_a_view,
-        &state_sampler,
-        "state_a_group",
-    );
+    randomize_state_texture(&queue, &state_a, STATE_WIDTH, STATE_HEIGHT);
+    randomize_state_texture(&queue, &state_b, STATE_WIDTH, STATE_HEIGHT);
 
     let state_pipeline = create_render_pipeline(
         &device,
@@ -194,10 +190,21 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
         present_mode,
         alpha_mode: caps.alpha_modes[0],
 
-        bind_group_layout: bind_group_layout,
+        bind_group_layout,
+        pipeline_layout,
+
         state_pipeline,
         display_pipeline,
+
         uniform_buf,
+        state_sampler,
+
+        state_a,
+        state_a_view,
+        state_b,
+        state_b_view,
+
+        read_state: ReadState::StateA,
         start: Instant::now(),
 
         uniforms: UniformState {
@@ -210,14 +217,6 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
         state_shader_source: state_shader,
         display_shader_source: display_shader,
         command_rx: rx,
-        state_sampler,
-        state_a,
-        state_a_view,
-        state_b,
-        state_b_view,
-        state_bind_group: bind_group_a,
-        pipeline_layout,
-        read_state: ReadState::StateA,
     };
 
     while !app.exit {
@@ -254,8 +253,6 @@ struct App {
     alpha_mode: wgpu::CompositeAlphaMode,
 
     bind_group_layout: wgpu::BindGroupLayout,
-    state_bind_group: wgpu::BindGroup,
-
     pipeline_layout: wgpu::PipelineLayout,
 
     state_pipeline: wgpu::RenderPipeline,
@@ -270,7 +267,6 @@ struct App {
     state_b_view: wgpu::TextureView,
 
     read_state: ReadState,
-
     start: Instant,
 
     uniforms: UniformState,
@@ -280,7 +276,7 @@ struct App {
 }
 
 impl App {
-    fn reconfigure(&self) {
+    fn reconfigure(&mut self) {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: self.surface_format,
@@ -293,6 +289,20 @@ impl App {
         };
 
         self.surface.configure(&self.device, &config);
+
+        let (state_a, state_a_view) =
+            create_state_texture(&self.device, STATE_WIDTH, STATE_HEIGHT, "state a");
+        let (state_b, state_b_view) =
+            create_state_texture(&self.device, STATE_WIDTH, STATE_HEIGHT, "state b");
+
+        randomize_state_texture(&self.queue, &state_a, STATE_WIDTH, STATE_HEIGHT);
+        randomize_state_texture(&self.queue, &state_b, STATE_WIDTH, STATE_HEIGHT);
+
+        self.state_a = state_a;
+        self.state_a_view = state_a_view;
+        self.state_b = state_b;
+        self.state_b_view = state_b_view;
+        self.read_state = ReadState::StateA;
     }
 
     fn handle_pending_commands(&mut self) {
@@ -418,7 +428,6 @@ impl App {
                 label: Some("main encoder"),
             });
 
-        // Pass 1: update state texture
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("state pass"),
@@ -442,7 +451,6 @@ impl App {
             pass.draw(0..3, 0..1);
         }
 
-        // Pass 2: show current written state on screen
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("display pass"),
@@ -527,7 +535,7 @@ fn create_state_sampler(device: &wgpu::Device) -> wgpu::Sampler {
 
 fn create_state_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("state adn display bind group layout"),
+        label: Some("state and display bind group layout"),
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -600,9 +608,9 @@ fn create_pipeline_layout(
 
 fn create_render_pipeline(
     device: &wgpu::Device,
-    surface_format: wgpu::TextureFormat,
+    target_format: wgpu::TextureFormat,
     pipeline_layout: &wgpu::PipelineLayout,
-    display_glsl: &str,
+    fragment_glsl: &str,
     label: &str,
 ) -> wgpu::RenderPipeline {
     let vs = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -614,17 +622,17 @@ fn create_render_pipeline(
         },
     });
 
-    let disp_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+    let fs = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(label),
         source: wgpu::ShaderSource::Glsl {
-            shader: display_glsl.into(),
+            shader: fragment_glsl.into(),
             stage: wgpu::naga::ShaderStage::Fragment,
             defines: Default::default(),
         },
     });
 
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("pipeline"),
+        label: Some(label),
         layout: Some(pipeline_layout),
         vertex: wgpu::VertexState {
             module: &vs,
@@ -633,10 +641,10 @@ fn create_render_pipeline(
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {
-            module: &disp_shader,
+            module: &fs,
             entry_point: Some("main"),
             targets: &[Some(wgpu::ColorTargetState {
-                format: surface_format,
+                format: target_format,
                 blend: Some(wgpu::BlendState::REPLACE),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
@@ -759,11 +767,11 @@ impl OutputHandler for App {
 }
 
 fn randomize_state_texture(queue: &wgpu::Queue, texture: &wgpu::Texture, width: u32, height: u32) {
-    const WIDTH: usize = 4;
+    const PIXEL_WIDTH: u32 = 4;
     let mut rng = rand::rng();
-    let mut data = vec![0u8; (width * height) as usize * WIDTH];
+    let mut data = vec![0u8; (width * height * PIXEL_WIDTH) as usize];
 
-    for px in data.chunks_exact_mut(8) {
+    for px in data.chunks_exact_mut(PIXEL_WIDTH as usize) {
         px[0] = rng.random();
         px[1] = rng.random();
         px[2] = rng.random();
@@ -780,7 +788,7 @@ fn randomize_state_texture(queue: &wgpu::Queue, texture: &wgpu::Texture, width: 
         &data,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
-            bytes_per_row: Some(width * WIDTH as u32),
+            bytes_per_row: Some(width * PIXEL_WIDTH),
             rows_per_image: Some(height),
         },
         wgpu::Extent3d {
