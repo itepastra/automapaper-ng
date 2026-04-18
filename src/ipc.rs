@@ -84,6 +84,14 @@ fn handle_client(
             tx.send(AppCommand::Shader { fragment_glsl })?;
             IpcResponse::Ok
         }
+        IpcRequest::StateShader { fragment_glsl } => {
+            tx.send(AppCommand::Shader { fragment_glsl })?;
+            IpcResponse::Ok
+        }
+        IpcRequest::InitShader { fragment_glsl } => {
+            tx.send(AppCommand::Shader { fragment_glsl })?;
+            IpcResponse::Ok
+        }
         IpcRequest::Get { name } => {
             // Keep Get simple: read current state via a second lightweight mechanism
             // would require a shared state visible to the IPC thread.

@@ -11,6 +11,19 @@ pub(crate) enum UniformValue {
     ColorRgba([f32; 4]),
 }
 
+impl Into<[f32; 4]> for UniformValue {
+    fn into(self) -> [f32; 4] {
+        match self {
+            UniformValue::Float(x) => [x, 0.0, 0.0, 1.0],
+            UniformValue::Vec2([x, y]) => [x, y, 0.0, 0.0],
+            UniformValue::Vec3([x, y, z]) => [x, y, z, 0.0],
+            UniformValue::Vec4([x, y, z, a]) => [x, y, z, a],
+            UniformValue::ColorRgb([r, g, b]) => [r, g, b, 1.0],
+            UniformValue::ColorRgba([r, g, b, a]) => [r, g, b, a],
+        }
+    }
+}
+
 pub fn parse_uniform_value(s: &str) -> Result<UniformValue, Box<dyn std::error::Error>> {
     if let Some(hex) = s.strip_prefix('#') {
         return parse_hex_color(hex);

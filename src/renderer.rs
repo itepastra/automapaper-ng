@@ -136,7 +136,6 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
         mapped_at_creation: false,
     });
 
-    let init_shader = read_to_string(config.get_init_path()).unwrap();
     let state_shader = read_to_string(config.get_state_path()).unwrap();
     let display_shader = read_to_string(config.get_display_path()).unwrap();
 
@@ -157,20 +156,22 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
         "state_a_group",
     );
 
-    let bind_group_b = create_bind_group(
+    let state_pipeline = create_render_pipeline(
         &device,
-        &bind_group_layout,
-        &uniform_buf,
-        &state_a_view,
-        &state_sampler,
-        "state_b_group",
+        STATE_FORMAT,
+        &pipeline_layout,
+        &state_shader,
+        "state pipeline",
     );
 
-    let state_pipeline =
-        create_state_pipeline(&device, STATE_FORMAT, &pipeline_layout, &state_shader);
+    let display_pipeline = create_render_pipeline(
+        &device,
+        surface_format,
+        &pipeline_layout,
+        &display_shader,
+        "display pipeline",
+    );
 
-    let display_pipeline =
-        create_render_pipeline(&device, surface_format, &pipeline_layout, &display_shader);
     let mut app = App {
         registry_state: RegistryState::new(&globals),
         output_state: OutputState::new(&globals, &qh),
@@ -195,8 +196,13 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
         uniform_buf,
         start: Instant::now(),
 
-        uniforms: UniformState::default(),
-        init_shader_source: init_shader,
+        uniforms: UniformState {
+            c1: config.c1.into(),
+            c2: config.c2.into(),
+            c3: config.c3.into(),
+            c4: config.c4.into(),
+            ..Default::default()
+        },
         state_shader_source: state_shader,
         display_shader_source: display_shader,
         command_rx: rx,
@@ -207,7 +213,7 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
         state_b_view,
         state_bind_group: bind_group_a,
         pipeline_layout,
-        read_state: todo!(),
+        read_state: ReadState::StateA,
     };
 
     while !app.exit {
@@ -264,7 +270,6 @@ struct App {
     start: Instant,
 
     uniforms: UniformState,
-    init_shader_source: String,
     state_shader_source: String,
     display_shader_source: String,
     command_rx: mpsc::Receiver<AppCommand>,
@@ -301,6 +306,7 @@ impl App {
                         self.surface_format,
                         &self.pipeline_layout,
                         &self.display_shader_source,
+                        "display shader",
                     );
                 }
             }
@@ -330,29 +336,6 @@ impl App {
                 Ok(())
             }
             _ => Err(format!("unsupported assignment: {name}")),
-        }
-    }
-
-    fn get_uniform_string(&self, name: &str) -> Option<String> {
-        match name {
-            "c1" => Some(format!(
-                "{:.6},{:.6},{:.6},{:.6}",
-                self.uniforms.c1[0], self.uniforms.c1[1], self.uniforms.c1[2], self.uniforms.c1[3],
-            )),
-            "c2" => Some(format!(
-                "{:.6},{:.6},{:.6},{:.6}",
-                self.uniforms.c2[0], self.uniforms.c2[1], self.uniforms.c2[2], self.uniforms.c2[3],
-            )),
-            "c3" => Some(format!(
-                "{:.6},{:.6},{:.6},{:.6}",
-                self.uniforms.c3[0], self.uniforms.c3[1], self.uniforms.c3[2], self.uniforms.c3[3],
-            )),
-            "c4" => Some(format!(
-                "{:.6},{:.6},{:.6},{:.6}",
-                self.uniforms.c4[0], self.uniforms.c4[1], self.uniforms.c4[2], self.uniforms.c4[3],
-            )),
-            "time_scale" => Some(format!("{:.6}", self.uniforms.time_scale)),
-            _ => None,
         }
     }
 
@@ -390,21 +373,40 @@ impl App {
                 self.reconfigure();
                 return;
             }
-            wgpu::CurrentSurfaceTexture::Timeout => {
-                return;
-            }
-            wgpu::CurrentSurfaceTexture::Occluded => {
-                return;
-            }
+            wgpu::CurrentSurfaceTexture::Timeout => return,
+            wgpu::CurrentSurfaceTexture::Occluded => return,
             wgpu::CurrentSurfaceTexture::Validation => {
                 eprintln!("surface validation error");
                 return;
             }
         };
 
-        let view = frame
+        let surface_view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let (read_view, write_view) = match self.read_state {
+            ReadState::StateA => (&self.state_a_view, &self.state_b_view),
+            ReadState::StateB => (&self.state_b_view, &self.state_a_view),
+        };
+
+        let read_bind_group = create_bind_group(
+            &self.device,
+            &self.bind_group_layout,
+            &self.uniform_buf,
+            read_view,
+            &self.state_sampler,
+            "read_bind_group",
+        );
+
+        let write_bind_group = create_bind_group(
+            &self.device,
+            &self.bind_group_layout,
+            &self.uniform_buf,
+            write_view,
+            &self.state_sampler,
+            "write_bind_group",
+        );
 
         let mut encoder = self
             .device
@@ -412,11 +414,12 @@ impl App {
                 label: Some("main encoder"),
             });
 
+        // Pass 1: update state texture
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("main pass"),
+                label: Some("state pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: write_view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -429,15 +432,43 @@ impl App {
                 timestamp_writes: None,
                 multiview_mask: None,
             });
+
+            pass.set_pipeline(&self.state_pipeline);
+            pass.set_bind_group(0, &read_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        // Pass 2: show current written state on screen
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("display pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &surface_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+
             pass.set_pipeline(&self.display_pipeline);
-            pass.set_bind_group(0, &self.state_bind_group, &[]);
+            pass.set_bind_group(0, &write_bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
 
         self.queue.submit([encoder.finish()]);
         frame.present();
 
-        drop(view);
+        self.read_state = match self.read_state {
+            ReadState::StateA => ReadState::StateB,
+            ReadState::StateB => ReadState::StateA,
+        };
 
         if self.needs_reconfigure {
             self.reconfigure();
@@ -566,6 +597,7 @@ fn create_render_pipeline(
     surface_format: wgpu::TextureFormat,
     pipeline_layout: &wgpu::PipelineLayout,
     display_glsl: &str,
+    label: &str,
 ) -> wgpu::RenderPipeline {
     let vs = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("vertex shader"),
@@ -577,7 +609,7 @@ fn create_render_pipeline(
     });
 
     let disp_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("display shader"),
+        label: Some(label),
         source: wgpu::ShaderSource::Glsl {
             shader: display_glsl.into(),
             stage: wgpu::naga::ShaderStage::Fragment,

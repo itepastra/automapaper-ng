@@ -11,14 +11,13 @@ use crate::uniform::UniformValue;
 
 #[derive(Serialize, Deserialize)]
 pub struct Config {
-    init_shader_path: PathBuf,
     state_shader_path: PathBuf,
     display_shader_path: PathBuf,
 
-    c1: UniformValue,
-    c2: UniformValue,
-    c3: UniformValue,
-    c4: UniformValue,
+    pub c1: UniformValue,
+    pub c2: UniformValue,
+    pub c3: UniformValue,
+    pub c4: UniformValue,
 }
 
 fn get_config_dir() -> PathBuf {
@@ -46,7 +45,6 @@ fn true_path(path: &PathBuf) -> PathBuf {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            init_shader_path: PathBuf::from("./init.glsl"),
             state_shader_path: PathBuf::from("./state.glsl"),
             display_shader_path: PathBuf::from("./display.glsl"),
 
@@ -59,9 +57,6 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn get_init_path(&self) -> PathBuf {
-        true_path(&self.init_shader_path)
-    }
     pub fn get_state_path(&self) -> PathBuf {
         true_path(&self.state_shader_path)
     }
