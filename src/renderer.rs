@@ -1,3 +1,4 @@
+use rand::RngExt;
 use raw_window_handle::{
     RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
 };
@@ -50,7 +51,7 @@ void main() {
 }
 "#;
 
-const STATE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+const STATE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
     let conn = Connection::connect_to_env().expect("failed to connect to Wayland");
@@ -144,8 +145,11 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
 
     let state_sampler = create_state_sampler(&device);
 
-    let (state_a, state_a_view) = create_state_texture(&device, 1920, 1080, "state a");
-    let (state_b, state_b_view) = create_state_texture(&device, 1920, 1080, "state b");
+    let (state_a, state_a_view) = create_state_texture(&device, 160, 100, "state a");
+    let (state_b, state_b_view) = create_state_texture(&device, 160, 100, "state b");
+
+    randomize_state_texture(&queue, &state_a, 160, 100);
+    randomize_state_texture(&queue, &state_b, 160, 100);
 
     let bind_group_a = create_bind_group(
         &device,
@@ -498,7 +502,9 @@ fn create_state_texture(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: STATE_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
 
@@ -750,6 +756,39 @@ impl OutputHandler for App {
         _output: wl_output::WlOutput,
     ) {
     }
+}
+
+fn randomize_state_texture(queue: &wgpu::Queue, texture: &wgpu::Texture, width: u32, height: u32) {
+    const WIDTH: usize = 4;
+    let mut rng = rand::rng();
+    let mut data = vec![0u8; (width * height) as usize * WIDTH];
+
+    for px in data.chunks_exact_mut(8) {
+        px[0] = rng.random();
+        px[1] = rng.random();
+        px[2] = rng.random();
+        px[3] = 255;
+    }
+
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &data,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(width * WIDTH as u32),
+            rows_per_image: Some(height),
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
 }
 
 delegate_compositor!(App);
