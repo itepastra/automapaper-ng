@@ -13,7 +13,6 @@ pub(crate) struct Cli {
 pub(crate) enum Command {
     Set { name: String, value: String },
     DisplayShader { path: PathBuf },
-    InitShader { path: PathBuf },
     StateShader { path: PathBuf },
     Get { name: String },
 }

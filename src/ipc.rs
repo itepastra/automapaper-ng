@@ -18,7 +18,6 @@ pub(crate) enum IpcRequest {
     Set { name: String, value: UniformValue },
     DisplayShader { fragment_glsl: String },
     StateShader { fragment_glsl: String },
-    InitShader { fragment_glsl: String },
     Get { name: String },
     Ping,
 }
@@ -81,15 +80,11 @@ fn handle_client(
             IpcResponse::Ok
         }
         IpcRequest::DisplayShader { fragment_glsl } => {
-            tx.send(AppCommand::Shader { fragment_glsl })?;
+            tx.send(AppCommand::DisplayShader { fragment_glsl })?;
             IpcResponse::Ok
         }
         IpcRequest::StateShader { fragment_glsl } => {
-            tx.send(AppCommand::Shader { fragment_glsl })?;
-            IpcResponse::Ok
-        }
-        IpcRequest::InitShader { fragment_glsl } => {
-            tx.send(AppCommand::Shader { fragment_glsl })?;
+            tx.send(AppCommand::StateShader { fragment_glsl })?;
             IpcResponse::Ok
         }
         IpcRequest::Get { name } => {

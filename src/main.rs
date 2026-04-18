@@ -18,6 +18,7 @@ mod config;
 mod ipc;
 mod renderer;
 mod uniform;
+mod wallpaper;
 
 #[derive(Debug)]
 enum AppCommand {
@@ -25,7 +26,10 @@ enum AppCommand {
         name: String,
         value: uniform::UniformValue,
     },
-    Shader {
+    DisplayShader {
+        fragment_glsl: String,
+    },
+    StateShader {
         fragment_glsl: String,
     },
 }
@@ -94,7 +98,6 @@ fn main() {
             });
         }
         Some(Command::DisplayShader { path }) => send_or_error(&path, ShaderType::Display),
-        Some(Command::InitShader { path }) => send_or_error(&path, ShaderType::Init),
         Some(Command::StateShader { path }) => send_or_error(&path, ShaderType::State),
         Some(Command::Get { name }) => {
             let req = IpcRequest::Get { name };
@@ -108,7 +111,6 @@ fn main() {
 
 enum ShaderType {
     Display,
-    Init,
     State,
 }
 
@@ -120,7 +122,6 @@ fn send_or_error(path: &PathBuf, shader_type: ShaderType) {
 
     let req = match shader_type {
         ShaderType::Display => IpcRequest::DisplayShader { fragment_glsl },
-        ShaderType::Init => IpcRequest::InitShader { fragment_glsl },
         ShaderType::State => IpcRequest::StateShader { fragment_glsl },
     };
 

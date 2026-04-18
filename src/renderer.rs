@@ -30,7 +30,8 @@ use wayland_client::{
 };
 
 use crate::{
-    config::Config, ipc::socket_path, uniform::UniformValue, AppCommand, Params, UniformState,
+    config::Config, ipc::socket_path, uniform::UniformValue, wallpaper::Wallpaper, AppCommand,
+    Params, UniformState,
 };
 
 const VERT_GLSL: &str = r#"
@@ -240,25 +241,14 @@ enum ReadState {
 }
 
 struct App {
+    // Shared
     registry_state: RegistryState,
     output_state: OutputState,
-
-    layer: LayerSurface,
-    exit: bool,
-    configured: bool,
-    needs_reconfigure: bool,
-    width: u32,
-    height: u32,
-    state_shrink_h: u32,
-    state_shrink_v: u32,
-
-    surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     surface_format: wgpu::TextureFormat,
     present_mode: wgpu::PresentMode,
     alpha_mode: wgpu::CompositeAlphaMode,
-
     bind_group_layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
 
@@ -268,18 +258,32 @@ struct App {
     uniform_buf: wgpu::Buffer,
     state_sampler: wgpu::Sampler,
 
+    exit: bool,
+    configured: bool,
+    needs_reconfigure: bool,
+    state_shrink_h: u32,
+    state_shrink_v: u32,
+
+    state_shader_source: String,
+    display_shader_source: String,
+
+    start: Instant,
+    uniforms: UniformState,
+    command_rx: mpsc::Receiver<AppCommand>,
+
+    wallpapers: Vec<Wallpaper>,
+    // per monitor
+    layer: LayerSurface,
+    surface: wgpu::Surface<'static>,
+    width: u32,
+    height: u32,
+
     state_a: wgpu::Texture,
     state_a_view: wgpu::TextureView,
     state_b: wgpu::Texture,
     state_b_view: wgpu::TextureView,
 
     read_state: ReadState,
-    start: Instant,
-
-    uniforms: UniformState,
-    state_shader_source: String,
-    display_shader_source: String,
-    command_rx: mpsc::Receiver<AppCommand>,
 }
 
 impl App {
@@ -323,7 +327,7 @@ impl App {
                         eprintln!("uniform update failed: {msg}");
                     }
                 }
-                AppCommand::Shader { fragment_glsl } => {
+                AppCommand::DisplayShader { fragment_glsl } => {
                     self.display_shader_source = fragment_glsl;
                     self.display_pipeline = create_render_pipeline(
                         &self.device,
@@ -332,6 +336,16 @@ impl App {
                         &self.display_shader_source,
                         "display shader",
                     );
+                }
+                AppCommand::StateShader { fragment_glsl } => {
+                    self.state_shader_source = fragment_glsl;
+                    self.state_pipeline = create_render_pipeline(
+                        &self.device,
+                        self.surface_format,
+                        &self.pipeline_layout,
+                        &self.state_shader_source,
+                        "state shader",
+                    )
                 }
             }
         }
@@ -503,33 +517,6 @@ impl App {
     }
 }
 
-fn create_state_texture(
-    device: &wgpu::Device,
-    width: u32,
-    height: u32,
-    label: &str,
-) -> (wgpu::Texture, wgpu::TextureView) {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some(label),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: STATE_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-            | wgpu::TextureUsages::TEXTURE_BINDING
-            | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
-
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    (texture, view)
-}
-
 fn create_state_sampler(device: &wgpu::Device) -> wgpu::Sampler {
     device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("state sampler"),
@@ -572,34 +559,6 @@ fn create_state_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayou
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: None,
-            },
-        ],
-    })
-}
-
-fn create_bind_group(
-    device: &wgpu::Device,
-    layout: &wgpu::BindGroupLayout,
-    uniform_buf: &wgpu::Buffer,
-    state_view: &wgpu::TextureView,
-    sampler: &wgpu::Sampler,
-    label: &str,
-) -> wgpu::BindGroup {
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some(label),
-        layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buf.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(state_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::Sampler(sampler),
             },
         ],
     })
@@ -774,39 +733,6 @@ impl OutputHandler for App {
         _output: wl_output::WlOutput,
     ) {
     }
-}
-
-fn randomize_state_texture(queue: &wgpu::Queue, texture: &wgpu::Texture, width: u32, height: u32) {
-    const PIXEL_WIDTH: u32 = 4;
-    let mut rng = rand::rng();
-    let mut data = vec![0u8; (width * height * PIXEL_WIDTH) as usize];
-
-    for px in data.chunks_exact_mut(PIXEL_WIDTH as usize) {
-        px[0] = rng.random();
-        px[1] = rng.random();
-        px[2] = rng.random();
-        px[3] = 255;
-    }
-
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        &data,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(width * PIXEL_WIDTH),
-            rows_per_image: Some(height),
-        },
-        wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
 }
 
 delegate_compositor!(App);
