@@ -18,6 +18,9 @@ pub struct Config {
     pub c2: UniformValue,
     pub c3: UniformValue,
     pub c4: UniformValue,
+
+    pub state_shrink_h: u32,
+    pub state_shrink_v: u32,
 }
 
 fn get_config_dir() -> PathBuf {
@@ -48,10 +51,13 @@ impl Default for Config {
             state_shader_path: PathBuf::from("./state.glsl"),
             display_shader_path: PathBuf::from("./display.glsl"),
 
-            c1: UniformValue::ColorRgb([1., 0., 0.]),
+            c1: UniformValue::ColorRgb([0., 0., 0.]),
             c2: UniformValue::ColorRgb([0., 1., 0.]),
             c3: UniformValue::ColorRgb([0., 0., 1.]),
             c4: UniformValue::ColorRgb([1., 1., 1.]),
+
+            state_shrink_h: 10,
+            state_shrink_v: 10,
         }
     }
 }
