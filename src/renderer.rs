@@ -52,8 +52,6 @@ void main() {
 "#;
 
 const STATE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-const STATE_WIDTH: u32 = 160;
-const STATE_HEIGHT: u32 = 100;
 
 pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
     let conn = Connection::connect_to_env().expect("failed to connect to Wayland");
@@ -148,13 +146,18 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
     let pipeline_layout = create_pipeline_layout(&device, &bind_group_layout);
     let state_sampler = create_state_sampler(&device);
 
-    let (state_a, state_a_view) =
-        create_state_texture(&device, STATE_WIDTH, STATE_HEIGHT, "state a");
-    let (state_b, state_b_view) =
-        create_state_texture(&device, STATE_WIDTH, STATE_HEIGHT, "state b");
+    let disp_width = 1920;
+    let disp_height = 1080;
+    let state_width = disp_width / config.state_shrink_h;
+    let state_height = disp_height / config.state_shrink_v;
 
-    randomize_state_texture(&queue, &state_a, STATE_WIDTH, STATE_HEIGHT);
-    randomize_state_texture(&queue, &state_b, STATE_WIDTH, STATE_HEIGHT);
+    let (state_a, state_a_view) =
+        create_state_texture(&device, state_width, state_height, "state a");
+    let (state_b, state_b_view) =
+        create_state_texture(&device, state_width, state_height, "state b");
+
+    randomize_state_texture(&queue, &state_a, state_width, state_height);
+    randomize_state_texture(&queue, &state_b, state_width, state_height);
 
     let state_pipeline = create_render_pipeline(
         &device,
@@ -180,8 +183,10 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
         exit: false,
         configured: false,
         needs_reconfigure: true,
-        width: 1920,
-        height: 1080,
+        width: disp_width,
+        height: disp_height,
+        state_shrink_h: config.state_shrink_h,
+        state_shrink_v: config.state_shrink_v,
 
         surface,
         device,
@@ -244,6 +249,8 @@ struct App {
     needs_reconfigure: bool,
     width: u32,
     height: u32,
+    state_shrink_h: u32,
+    state_shrink_v: u32,
 
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -290,13 +297,16 @@ impl App {
 
         self.surface.configure(&self.device, &config);
 
-        let (state_a, state_a_view) =
-            create_state_texture(&self.device, STATE_WIDTH, STATE_HEIGHT, "state a");
-        let (state_b, state_b_view) =
-            create_state_texture(&self.device, STATE_WIDTH, STATE_HEIGHT, "state b");
+        let state_width = self.width / self.state_shrink_h;
+        let state_height = self.height / self.state_shrink_v;
 
-        randomize_state_texture(&self.queue, &state_a, STATE_WIDTH, STATE_HEIGHT);
-        randomize_state_texture(&self.queue, &state_b, STATE_WIDTH, STATE_HEIGHT);
+        let (state_a, state_a_view) =
+            create_state_texture(&self.device, state_width, state_height, "state a");
+        let (state_b, state_b_view) =
+            create_state_texture(&self.device, state_width, state_height, "state b");
+
+        randomize_state_texture(&self.queue, &state_a, state_width, state_height);
+        randomize_state_texture(&self.queue, &state_b, state_width, state_height);
 
         self.state_a = state_a;
         self.state_a_view = state_a_view;
