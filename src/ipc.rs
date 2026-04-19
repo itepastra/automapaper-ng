@@ -19,6 +19,7 @@ pub(crate) enum IpcRequest {
     DisplayShader { fragment_glsl: String },
     StateShader { fragment_glsl: String },
     Get { name: String },
+    Stop,
     Ping,
 }
 
@@ -96,6 +97,10 @@ fn handle_client(
             }
         }
         IpcRequest::Ping => IpcResponse::Pong,
+        IpcRequest::Stop => {
+            tx.send(AppCommand::Stop)?;
+            IpcResponse::Ok
+        }
     };
 
     serde_json::to_writer(&mut stream, &response)?;

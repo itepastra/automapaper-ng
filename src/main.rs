@@ -26,6 +26,7 @@ enum AppCommand {
         name: String,
         value: uniform::ColorValue,
     },
+    Stop,
     DisplayShader {
         fragment_glsl: String,
     },
@@ -105,6 +106,13 @@ fn main() {
                 eprintln!("{e}");
                 std::process::exit(1);
             });
+        }
+        Some(Command::Stop) => {
+            let req = IpcRequest::Stop;
+            send_request_and_print(&req).unwrap_or_else(|e| {
+                eprintln!("{e}");
+                std::process::exit(1);
+            })
         }
     }
 }

@@ -209,6 +209,7 @@ impl App {
                         eprintln!("uniform update failed: {msg}")
                     }
                 }
+                AppCommand::Stop => self.exit = true,
                 AppCommand::DisplayShader { fragment_glsl } => todo!(),
                 AppCommand::StateShader { fragment_glsl } => todo!(),
             }

@@ -15,4 +15,5 @@ pub(crate) enum Command {
     DisplayShader { path: PathBuf },
     StateShader { path: PathBuf },
     Get { name: String },
+    Stop,
 }
