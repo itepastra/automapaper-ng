@@ -21,6 +21,8 @@ pub struct Config {
 
     pub state_shrink_h: u32,
     pub state_shrink_v: u32,
+
+    pub decay_time: f32,
 }
 
 fn get_config_dir() -> PathBuf {
@@ -58,6 +60,8 @@ impl Default for Config {
 
             state_shrink_h: 10,
             state_shrink_v: 10,
+
+            decay_time: 0.1,
         }
     }
 }

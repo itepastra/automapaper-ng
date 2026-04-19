@@ -1,5 +1,6 @@
 use std::{
     fs,
+    ops::{Add, Mul},
     path::{self, PathBuf},
     sync::mpsc,
 };
@@ -42,6 +43,31 @@ struct UniformState {
     c2: [f32; 4],
     c3: [f32; 4],
     c4: [f32; 4],
+}
+
+fn mix<T>(this: [T; 4], that: [T; 4], amount: f32) -> [T; 4]
+where
+    f32: Mul<T, Output = T>,
+    T: Add<Output = T> + Copy,
+{
+    [
+        (1. - amount) * this[0] + amount * that[0],
+        (1. - amount) * this[1] + amount * that[1],
+        (1. - amount) * this[2] + amount * that[2],
+        (1. - amount) * this[3] + amount * that[3],
+    ]
+}
+
+impl UniformState {
+    pub fn mix(&self, other: &Self, amount: f32) -> Self {
+        UniformState {
+            time_scale: (1. - amount) * self.time_scale + amount * other.time_scale,
+            c1: mix(self.c1, other.c1, amount),
+            c2: mix(self.c2, other.c2, amount),
+            c3: mix(self.c3, other.c3, amount),
+            c4: mix(self.c4, other.c4, amount),
+        }
+    }
 }
 
 impl Default for UniformState {

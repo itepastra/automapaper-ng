@@ -17,6 +17,7 @@ use smithay_client_toolkit::{
     },
 };
 use std::{
+    f32::consts::LN_2,
     fs::{self, read_to_string},
     num::NonZeroU32,
     ptr::NonNull,
@@ -94,13 +95,15 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
 
     let state_pipeline = create_state_pipeline(&device, &pipeline_layout, &state_shader);
 
-    let uniforms = UniformState {
+    let current_uniforms = UniformState {
         c1: config.c1.into(),
         c2: config.c2.into(),
         c3: config.c3.into(),
         c4: config.c4.into(),
         ..Default::default()
     };
+
+    let target_uniforms = current_uniforms.clone();
 
     let mut app = App {
         registry_state: RegistryState::new(&globals),
@@ -122,12 +125,15 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
 
         shrink_horizontal: config.state_shrink_h,
         shrink_vertical: config.state_shrink_v,
-        uniforms,
+        decay_time: config.decay_time,
+        current_uniforms,
+        target_uniforms,
         state_shader_source: state_shader,
         display_shader_source: display_shader,
         command_rx: rx,
         start: Instant::now(),
         wallpapers: Vec::new(),
+        last_frame: Instant::now(),
         exit: false,
     };
 
@@ -166,35 +172,52 @@ pub struct App {
 
     shrink_horizontal: u32,
     shrink_vertical: u32,
-    uniforms: UniformState,
+    decay_time: f32,
+    current_uniforms: UniformState,
+    target_uniforms: UniformState,
     state_shader_source: String,
     display_shader_source: String,
     command_rx: mpsc::Receiver<AppCommand>,
     start: Instant,
+    last_frame: Instant,
 
     wallpapers: Vec<Wallpaper>,
     exit: bool,
 }
 
 impl App {
+    fn update_uniforms(&mut self) {
+        let now = Instant::now();
+        let dt = (now - self.last_frame).as_secs_f32();
+        self.last_frame = now;
+
+        let alpha = if self.decay_time <= 0.0 {
+            1.0
+        } else {
+            1.0 - 0.5_f32.powf(dt / self.decay_time)
+        };
+
+        self.current_uniforms = self.current_uniforms.mix(&self.target_uniforms, alpha);
+    }
+
     fn make_params(&self) -> Params {
         Params {
             resolution: [1., 1.],
             time: self.start.elapsed().as_secs_f32(),
-            time_scale: self.uniforms.time_scale,
-            c1: self.uniforms.c1,
-            c2: self.uniforms.c2,
-            c3: self.uniforms.c3,
-            c4: self.uniforms.c4,
+            time_scale: self.current_uniforms.time_scale,
+            c1: self.current_uniforms.c1,
+            c2: self.current_uniforms.c2,
+            c3: self.current_uniforms.c3,
+            c4: self.current_uniforms.c4,
         }
     }
 
     fn apply_color_update(&mut self, name: &str, value: ColorValue) -> Result<(), String> {
         match name {
-            "c1" => self.uniforms.c1 = value.into(),
-            "c2" => self.uniforms.c2 = value.into(),
-            "c3" => self.uniforms.c3 = value.into(),
-            "c4" => self.uniforms.c4 = value.into(),
+            "c1" => self.target_uniforms.c1 = value.into(),
+            "c2" => self.target_uniforms.c2 = value.into(),
+            "c3" => self.target_uniforms.c3 = value.into(),
+            "c4" => self.target_uniforms.c4 = value.into(),
 
             _ => return Err(format!("unsupported assignment: {name}")),
         }
@@ -339,6 +362,7 @@ impl CompositorHandler for App {
         _time: u32,
     ) {
         self.handle_pending_commands();
+        self.update_uniforms();
 
         let params = self.make_params();
 
