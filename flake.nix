@@ -73,16 +73,16 @@
               pkgs.vulkan-loader
             ];
 
-            # postInstall = ''
-            #   wrapProgram $out/bin/automapaper-ng \
-            #     --prefix LD_LIBRARY_PATH : ${
-            #       lib.makeLibraryPath [
-            #         pkgs.wayland
-            #         pkgs.libxkbcommon
-            #         pkgs.vulkan-loader
-            #       ]
-            #     }
-            # '';
+            postInstall = ''
+              wrapProgram $out/bin/automapaper-ng \
+                --prefix LD_LIBRARY_PATH : ${
+                  lib.makeLibraryPath [
+                    pkgs.wayland
+                    pkgs.libxkbcommon
+                    pkgs.vulkan-loader
+                  ]
+                }
+            '';
           }
         );
       in
