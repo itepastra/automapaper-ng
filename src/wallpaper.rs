@@ -227,6 +227,7 @@ impl Wallpaper {
         self.layer
             .wl_surface()
             .frame(qh, self.layer.wl_surface().clone());
+        self.layer.wl_surface().commit();
     }
 
     pub fn reconfigure(
