@@ -66,10 +66,10 @@ pub struct Wallpaper {
     present_mode: wgpu::PresentMode,
     alpha_mode: wgpu::CompositeAlphaMode,
 
-    width: u32,
-    shrink_horizontal: u32,
-    height: u32,
-    shrink_vertical: u32,
+    pub width: u32,
+    pub shrink_horizontal: u32,
+    pub height: u32,
+    pub shrink_vertical: u32,
 
     display_pipeline: wgpu::RenderPipeline,
 

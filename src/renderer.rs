@@ -4,10 +4,15 @@ use raw_window_handle::{
 };
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
-    delegate_compositor, delegate_layer, delegate_output, delegate_registry,
+    delegate_compositor, delegate_layer, delegate_output, delegate_pointer, delegate_registry,
+    delegate_seat,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
+    seat::{
+        pointer::{PointerEvent, PointerEventKind, PointerHandler},
+        Capability, SeatHandler, SeatState,
+    },
     shell::{
         wlr_layer::{
             Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
@@ -26,7 +31,7 @@ use std::{
 };
 use wayland_client::{
     globals::registry_queue_init,
-    protocol::{wl_output, wl_surface},
+    protocol::{wl_output, wl_pointer::WlPointer, wl_surface},
     Connection, Proxy, QueueHandle,
 };
 use wgpu::{
@@ -123,6 +128,9 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
         uniform_buf,
         state_sampler,
 
+        pointer: None,
+        seat_state: SeatState::new(&globals, &qh),
+
         shrink_horizontal: config.state_shrink_h,
         shrink_vertical: config.state_shrink_v,
         decay_time: config.decay_time,
@@ -171,6 +179,9 @@ pub struct App {
     uniform_buf: wgpu::Buffer,
     state_sampler: wgpu::Sampler,
 
+    seat_state: SeatState,
+    pointer: Option<WlPointer>,
+
     shrink_horizontal: u32,
     shrink_vertical: u32,
     decay_time: f32,
@@ -202,7 +213,7 @@ impl App {
         self.current_uniforms = self.current_uniforms.mix(&self.target_uniforms, alpha);
     }
 
-    fn make_params(&self) -> Params {
+    fn make_params(&self, surface_index: usize) -> Params {
         Params {
             resolution: [1., 1.],
             time: self.start.elapsed().as_secs_f32(),
@@ -211,6 +222,12 @@ impl App {
             c2: self.current_uniforms.c2,
             c3: self.current_uniforms.c3,
             c4: self.current_uniforms.c4,
+            mouse: self.current_uniforms.mouse,
+            mouse_active: if self.current_uniforms.monitor == surface_index {
+                1.0
+            } else {
+                0.0
+            },
         }
     }
 
@@ -366,9 +383,8 @@ impl CompositorHandler for App {
         self.handle_pending_commands();
         self.update_uniforms();
 
-        let params = self.make_params();
-
         if let Some(i) = self.wallpaper_index_by_surface(surface) {
+            let params = self.make_params(i);
             let wallpaper = &mut self.wallpapers[i];
 
             let needs_reconfigure = wallpaper.draw(
@@ -429,9 +445,9 @@ impl LayerShellHandler for App {
         _serial: u32,
     ) {
         self.handle_pending_commands();
-        let params = &self.make_params();
 
         if let Some(i) = self.wallpaper_index_by_layer(layer) {
+            let params = &self.make_params(i);
             let wallpaper = &mut self.wallpapers[i];
 
             wallpaper.set_size(
@@ -505,10 +521,110 @@ impl OutputHandler for App {
     }
 }
 
+impl SeatHandler for App {
+    fn seat_state(&mut self) -> &mut smithay_client_toolkit::seat::SeatState {
+        &mut self.seat_state
+    }
+
+    fn new_seat(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _seat: wayland_client::protocol::wl_seat::WlSeat,
+    ) {
+    }
+
+    fn new_capability(
+        &mut self,
+        conn: &Connection,
+        qh: &QueueHandle<Self>,
+        seat: wayland_client::protocol::wl_seat::WlSeat,
+        capability: smithay_client_toolkit::seat::Capability,
+    ) {
+        if capability == Capability::Pointer && self.pointer.is_none() {
+            let pointer = self
+                .seat_state
+                .get_pointer(qh, &seat)
+                .expect("failed to create pointer");
+            self.pointer = Some(pointer);
+        }
+    }
+
+    fn remove_capability(
+        &mut self,
+        conn: &Connection,
+        qh: &QueueHandle<Self>,
+        seat: wayland_client::protocol::wl_seat::WlSeat,
+        capability: smithay_client_toolkit::seat::Capability,
+    ) {
+        if capability == Capability::Pointer {
+            if let Some(pointer) = self.pointer.take() {
+                pointer.release();
+            }
+        }
+    }
+
+    fn remove_seat(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _seat: wayland_client::protocol::wl_seat::WlSeat,
+    ) {
+    }
+}
+
+impl PointerHandler for App {
+    fn pointer_frame(
+        &mut self,
+        conn: &Connection,
+        qh: &QueueHandle<Self>,
+        pointer: &wayland_client::protocol::wl_pointer::WlPointer,
+        events: &[smithay_client_toolkit::seat::pointer::PointerEvent],
+    ) {
+        for event in events {
+            let Some(i) = self.wallpaper_index_by_surface(&event.surface) else {
+                continue;
+            };
+
+            let wallpaper = &self.wallpapers[i];
+            let width = wallpaper.width.max(1) as f64;
+            let height = wallpaper.width.max(1) as f64;
+
+            match event.kind {
+                PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
+                    let x = (event.position.0 / width).clamp(0.0, 1.0) as f32;
+                    let y = (event.position.1 / height).clamp(0.0, 1.0) as f32;
+                    self.target_uniforms.mouse = [x, y];
+                    self.current_uniforms.mouse = [x, y];
+                }
+                PointerEventKind::Leave { serial } => {}
+                PointerEventKind::Press {
+                    time,
+                    button,
+                    serial,
+                } => {}
+                PointerEventKind::Release {
+                    time,
+                    button,
+                    serial,
+                } => {}
+                PointerEventKind::Axis {
+                    time,
+                    horizontal,
+                    vertical,
+                    source,
+                } => {}
+            }
+        }
+    }
+}
+
 delegate_compositor!(App);
 delegate_output!(App);
 delegate_layer!(App);
 delegate_registry!(App);
+delegate_seat!(App);
+delegate_pointer!(App);
 
 impl ProvidesRegistryState for App {
     fn registry(&mut self) -> &mut RegistryState {

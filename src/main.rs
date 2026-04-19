@@ -43,6 +43,8 @@ struct UniformState {
     c2: [f32; 4],
     c3: [f32; 4],
     c4: [f32; 4],
+    mouse: [f32; 2],
+    monitor: usize,
 }
 
 fn mix<T>(this: [T; 4], that: [T; 4], amount: f32) -> [T; 4]
@@ -66,6 +68,8 @@ impl UniformState {
             c2: mix(self.c2, other.c2, amount),
             c3: mix(self.c3, other.c3, amount),
             c4: mix(self.c4, other.c4, amount),
+            mouse: self.mouse,
+            monitor: self.monitor,
         }
     }
 }
@@ -78,6 +82,8 @@ impl Default for UniformState {
             c2: [0.0, 0.0, 1.0, 1.0],
             c3: [0.0, 0.0, 1.0, 1.0],
             c4: [0.0, 0.0, 1.0, 1.0],
+            mouse: [0.5, 0.5],
+            monitor: 0,
         }
     }
 }
@@ -92,6 +98,8 @@ struct Params {
     c2: [f32; 4],
     c3: [f32; 4],
     c4: [f32; 4],
+    mouse: [f32; 2],
+    mouse_active: f32,
 }
 
 fn main() {

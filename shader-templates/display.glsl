@@ -32,4 +32,5 @@ void main() {
     float brightness = state.r + 0.2 * pow(state.g, 3.0);
 
     out_color = mix(ubo.c1, ubo.c2, brightness * mask);
+    out_color.g = state.g
 }
