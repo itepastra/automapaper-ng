@@ -1,7 +1,3 @@
-use rand::RngExt;
-use raw_window_handle::{
-    RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
-};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_compositor, delegate_layer, delegate_output, delegate_pointer, delegate_registry,
@@ -10,32 +6,30 @@ use smithay_client_toolkit::{
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
     seat::{
-        pointer::{PointerEvent, PointerEventKind, PointerHandler},
+        pointer::{PointerEventKind, PointerHandler},
         Capability, SeatHandler, SeatState,
     },
     shell::{
         wlr_layer::{
-            Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
+            LayerShell, LayerShellHandler, LayerSurface,
             LayerSurfaceConfigure,
         },
         WaylandSurface,
     },
 };
 use std::{
-    f32::consts::LN_2,
     fs::{self, read_to_string},
     num::NonZeroU32,
-    ptr::NonNull,
     sync::mpsc::{self, Receiver},
     time::{Duration, Instant},
 };
 use wayland_client::{
     globals::registry_queue_init,
     protocol::{wl_output, wl_pointer::WlPointer, wl_surface},
-    Connection, Proxy, QueueHandle,
+    Connection, QueueHandle,
 };
 use wgpu::{
-    Adapter, BackendOptions, Backends, BufferDescriptor, BufferUsages, DeviceDescriptor,
+    BackendOptions, Backends, BufferDescriptor, BufferUsages, DeviceDescriptor,
     ExperimentalFeatures, Features, Instance, InstanceDescriptor, InstanceFlags, Limits,
     MemoryBudgetThresholds, RequestAdapterOptions, Trace,
 };
@@ -44,7 +38,7 @@ use crate::{
     config::Config,
     ipc::socket_path,
     uniform::ColorValue,
-    wallpaper::{self, create_state_pipeline, Wallpaper},
+    wallpaper::{create_state_pipeline, Wallpaper},
     AppCommand, Params, UniformState,
 };
 
@@ -253,8 +247,8 @@ impl App {
                     }
                 }
                 AppCommand::Stop => self.exit = true,
-                AppCommand::DisplayShader { fragment_glsl } => todo!(),
-                AppCommand::StateShader { fragment_glsl } => todo!(),
+                AppCommand::DisplayShader { fragment_glsl: _ } => todo!(),
+                AppCommand::StateShader { fragment_glsl: _ } => todo!(),
             }
         }
     }
@@ -434,7 +428,7 @@ impl CompositorHandler for App {
 
 impl LayerShellHandler for App {
     fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _layer: &LayerSurface) {
-        if self.wallpapers.len() == 0 {
+        if self.wallpapers.is_empty() {
             self.exit = true;
         }
     }
@@ -475,7 +469,7 @@ impl LayerShellHandler for App {
                 &self.uniform_buf,
                 &self.state_sampler,
                 &self.state_pipeline,
-                &params,
+                params,
                 self.frame_time,
             );
 
@@ -539,7 +533,7 @@ impl SeatHandler for App {
 
     fn new_capability(
         &mut self,
-        conn: &Connection,
+        _conn: &Connection,
         qh: &QueueHandle<Self>,
         seat: wayland_client::protocol::wl_seat::WlSeat,
         capability: smithay_client_toolkit::seat::Capability,
@@ -555,9 +549,9 @@ impl SeatHandler for App {
 
     fn remove_capability(
         &mut self,
-        conn: &Connection,
-        qh: &QueueHandle<Self>,
-        seat: wayland_client::protocol::wl_seat::WlSeat,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _seat: wayland_client::protocol::wl_seat::WlSeat,
         capability: smithay_client_toolkit::seat::Capability,
     ) {
         if capability == Capability::Pointer {
@@ -579,9 +573,9 @@ impl SeatHandler for App {
 impl PointerHandler for App {
     fn pointer_frame(
         &mut self,
-        conn: &Connection,
-        qh: &QueueHandle<Self>,
-        pointer: &wayland_client::protocol::wl_pointer::WlPointer,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _pointer: &wayland_client::protocol::wl_pointer::WlPointer,
         events: &[smithay_client_toolkit::seat::pointer::PointerEvent],
     ) {
         for event in events {
@@ -602,22 +596,22 @@ impl PointerHandler for App {
                     self.target_uniforms.mouse = [x, y];
                     self.current_uniforms.mouse = [x, y];
                 }
-                PointerEventKind::Leave { serial } => {}
+                PointerEventKind::Leave { serial: _ } => {}
                 PointerEventKind::Press {
-                    time,
-                    button,
-                    serial,
+                    time: _,
+                    button: _,
+                    serial: _,
                 } => {}
                 PointerEventKind::Release {
-                    time,
-                    button,
-                    serial,
+                    time: _,
+                    button: _,
+                    serial: _,
                 } => {}
                 PointerEventKind::Axis {
-                    time,
-                    horizontal,
-                    vertical,
-                    source,
+                    time: _,
+                    horizontal: _,
+                    vertical: _,
+                    source: _,
                 } => {}
             }
         }

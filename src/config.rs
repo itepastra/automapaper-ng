@@ -3,7 +3,6 @@ use std::{
     io::Write,
     path::PathBuf,
     process,
-    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
@@ -39,7 +38,7 @@ pub struct Config {
 fn get_config_dir() -> PathBuf {
     let mut config_file = dirs::config_dir().unwrap();
     config_file.push("automapaper-ng");
-    return config_file;
+    config_file
 }
 
 fn true_path(path: &PathBuf) -> PathBuf {
@@ -55,7 +54,7 @@ fn true_path(path: &PathBuf) -> PathBuf {
     }
 
     let can_path = abs_path.canonicalize().unwrap();
-    return can_path;
+    can_path
 }
 
 impl Default for Config {
@@ -106,5 +105,5 @@ pub fn get_config() -> Config {
     }
     println!("The file {config_file:?} does exist");
 
-    return toml::from_str(&read_to_string(config_file).unwrap()).unwrap();
+    toml::from_str(&read_to_string(config_file).unwrap()).unwrap()
 }

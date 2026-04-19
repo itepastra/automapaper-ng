@@ -15,14 +15,14 @@ impl Serialize for ColorValue {
     where
         S: serde::Serializer,
     {
-        match self {
-            &ColorValue::ColorRgb([r, g, b]) => serializer.collect_str(&format!(
+        match *self {
+            ColorValue::ColorRgb([r, g, b]) => serializer.collect_str(&format!(
                 "{:02x}{:02x}{:02x}",
                 (r.clamp(0.0, 1.0) * 255.0).round() as u8,
                 (g.clamp(0.0, 1.0) * 255.0).round() as u8,
                 (b.clamp(0.0, 1.0) * 255.0).round() as u8,
             )),
-            &ColorValue::ColorRgba([r, g, b, a]) => serializer.collect_str(&format!(
+            ColorValue::ColorRgba([r, g, b, a]) => serializer.collect_str(&format!(
                 "{:02x}{:02x}{:02x}{:02x}",
                 (r.clamp(0.0, 1.0) * 255.0).round() as u8,
                 (g.clamp(0.0, 1.0) * 255.0).round() as u8,
@@ -39,9 +39,9 @@ pub(crate) enum ColorValue {
     ColorRgba([f32; 4]),
 }
 
-impl Into<[f32; 4]> for ColorValue {
-    fn into(self) -> [f32; 4] {
-        match self {
+impl From<ColorValue> for [f32; 4] {
+    fn from(val: ColorValue) -> Self {
+        match val {
             ColorValue::ColorRgb([r, g, b]) => [r, g, b, 1.0],
             ColorValue::ColorRgba([r, g, b, a]) => [r, g, b, a],
         }
@@ -52,7 +52,7 @@ pub fn parse_uniform_value(s: &str) -> Result<ColorValue, Box<dyn std::error::Er
     if let Some(hex) = s.strip_prefix('#') {
         return parse_hex_color(hex);
     }
-    return parse_hex_color(s);
+    parse_hex_color(s)
 }
 
 fn parse_hex_color(hex: &str) -> Result<ColorValue, Box<dyn std::error::Error>> {

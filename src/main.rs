@@ -1,13 +1,13 @@
 use std::{
     fs,
     ops::{Add, Mul},
-    path::{self, PathBuf},
+    path::PathBuf,
     sync::mpsc,
 };
 
 use crate::{
     cli::{Cli, Command},
-    config::{get_config, Config},
+    config::get_config,
     ipc::{send_request_and_print, socket_path, spawn_ipc_server, IpcRequest},
     renderer::run_renderer,
     uniform::parse_uniform_value,
@@ -158,7 +158,7 @@ enum ShaderType {
 }
 
 fn send_or_error(path: &PathBuf, shader_type: ShaderType) {
-    let fragment_glsl = fs::read_to_string(&path).unwrap_or_else(|e| {
+    let fragment_glsl = fs::read_to_string(path).unwrap_or_else(|e| {
         eprintln!("failed to read shader '{}': {e}", path.display());
         std::process::exit(2);
     });
