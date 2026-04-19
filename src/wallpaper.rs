@@ -221,12 +221,6 @@ impl Wallpaper {
     pub fn wl_surface(&self) -> &wl_surface::WlSurface {
         self.layer.wl_surface()
     }
-    pub fn surface_format(&self) -> wgpu::TextureFormat {
-        self.surface_format
-    }
-    pub fn set_display_pipeline(&mut self, pipeline: wgpu::RenderPipeline) {
-        self.display_pipeline = pipeline;
-    }
     pub fn set_size(&mut self, width: u32, height: u32) {
         self.width = width;
         self.height = height;

@@ -9,13 +9,7 @@ use smithay_client_toolkit::{
         pointer::{PointerEventKind, PointerHandler},
         Capability, SeatHandler, SeatState,
     },
-    shell::{
-        wlr_layer::{
-            LayerShell, LayerShellHandler, LayerSurface,
-            LayerSurfaceConfigure,
-        },
-        WaylandSurface,
-    },
+    shell::wlr_layer::{LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
 };
 use std::{
     fs::{self, read_to_string},
@@ -147,11 +141,6 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
     }
 
     let _ = fs::remove_file(socket_path());
-}
-
-enum ReadState {
-    StateA,
-    StateB,
 }
 
 pub struct App {
