@@ -57,6 +57,7 @@ impl ReadState {
     }
 }
 
+#[derive(Debug)]
 pub struct Wallpaper {
     output: wl_output::WlOutput,
     layer: LayerSurface,

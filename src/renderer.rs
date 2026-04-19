@@ -434,7 +434,9 @@ impl CompositorHandler for App {
 
 impl LayerShellHandler for App {
     fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _layer: &LayerSurface) {
-        self.exit = true;
+        if self.wallpapers.len() == 0 {
+            self.exit = true;
+        }
     }
 
     fn configure(
