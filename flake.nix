@@ -52,6 +52,13 @@
 
           # Additional environment variables can be set directly
           # MY_CUSTOM_VAR = "some value";
+          LD_LIBRARY_PATH = "${
+            lib.makeLibraryPath [
+              pkgs.wayland
+              pkgs.libxkbcommon
+              pkgs.vulkan-loader
+            ]
+          }:$LD_LIBRARY_PATH";
         };
 
         # Build *just* the cargo dependencies, so we can reuse
