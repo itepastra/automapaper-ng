@@ -109,6 +109,7 @@ fn main() {
     let cli = Cli::parse();
     let config = get_config();
 
+    println!("{:#?}", cli.command);
     match cli.command {
         None => {
             let socket_path = socket_path();
