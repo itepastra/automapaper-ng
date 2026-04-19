@@ -53,8 +53,8 @@ fn true_path(path: &PathBuf) -> PathBuf {
         process::exit(3);
     }
 
-    let can_path = abs_path.canonicalize().unwrap();
-    can_path
+    
+    abs_path.canonicalize().unwrap()
 }
 
 impl Default for Config {
