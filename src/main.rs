@@ -100,6 +100,7 @@ struct Params {
     c4: [f32; 4],
     mouse: [f32; 2],
     mouse_active: f32,
+    extra: f32,
 }
 
 fn main() {

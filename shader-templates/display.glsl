@@ -11,6 +11,9 @@ layout(set = 0, binding = 0) uniform Params {
     vec4 c2;
     vec4 c3;
     vec4 c4;
+    vec2 mouse;
+    float mouse_active;
+    float extra;
 } ubo;
 
 layout(set = 0, binding = 1) uniform texture2D state_tex;
@@ -32,5 +35,4 @@ void main() {
     float brightness = state.r + 0.2 * pow(state.g, 3.0);
 
     out_color = mix(ubo.c1, ubo.c2, brightness * mask);
-    out_color.g = state.g
 }

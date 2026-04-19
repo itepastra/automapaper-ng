@@ -228,6 +228,7 @@ impl App {
             } else {
                 0.0
             },
+            extra: 0.0,
         }
     }
 
@@ -586,9 +587,11 @@ impl PointerHandler for App {
                 continue;
             };
 
+            self.current_uniforms.monitor = i;
+            self.target_uniforms.monitor = i;
             let wallpaper = &self.wallpapers[i];
             let width = wallpaper.width.max(1) as f64;
-            let height = wallpaper.width.max(1) as f64;
+            let height = wallpaper.height.max(1) as f64;
 
             match event.kind {
                 PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
