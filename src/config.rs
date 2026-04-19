@@ -3,6 +3,7 @@ use std::{
     io::Write,
     path::PathBuf,
     process,
+    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,7 @@ pub struct Config {
     pub state_shrink_v: u32,
 
     pub decay_time: f32,
+    pub frame_time: f32,
 }
 
 fn get_config_dir() -> PathBuf {
@@ -62,6 +64,7 @@ impl Default for Config {
             state_shrink_v: 10,
 
             decay_time: 0.1,
+            frame_time: 1.0 / 10.0,
         }
     }
 }

@@ -22,7 +22,7 @@ use std::{
     num::NonZeroU32,
     ptr::NonNull,
     sync::mpsc::{self, Receiver},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use wayland_client::{
     globals::registry_queue_init,
@@ -126,14 +126,15 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
         shrink_horizontal: config.state_shrink_h,
         shrink_vertical: config.state_shrink_v,
         decay_time: config.decay_time,
+        frame_time: Duration::from_secs_f32(config.frame_time),
         current_uniforms,
         target_uniforms,
         state_shader_source: state_shader,
         display_shader_source: display_shader,
         command_rx: rx,
         start: Instant::now(),
+        last_uniform_update: Instant::now(),
         wallpapers: Vec::new(),
-        last_frame: Instant::now(),
         exit: false,
     };
 
@@ -173,13 +174,14 @@ pub struct App {
     shrink_horizontal: u32,
     shrink_vertical: u32,
     decay_time: f32,
+    frame_time: Duration,
     current_uniforms: UniformState,
     target_uniforms: UniformState,
     state_shader_source: String,
     display_shader_source: String,
     command_rx: mpsc::Receiver<AppCommand>,
     start: Instant,
-    last_frame: Instant,
+    last_uniform_update: Instant,
 
     wallpapers: Vec<Wallpaper>,
     exit: bool,
@@ -188,8 +190,8 @@ pub struct App {
 impl App {
     fn update_uniforms(&mut self) {
         let now = Instant::now();
-        let dt = (now - self.last_frame).as_secs_f32();
-        self.last_frame = now;
+        let dt = (now - self.last_uniform_update).as_secs_f32();
+        self.last_uniform_update = now;
 
         let alpha = if self.decay_time <= 0.0 {
             1.0
@@ -377,6 +379,7 @@ impl CompositorHandler for App {
                 &self.state_sampler,
                 &self.state_pipeline,
                 &params,
+                self.frame_time,
             );
 
             if needs_reconfigure {
@@ -454,6 +457,7 @@ impl LayerShellHandler for App {
                 &self.state_sampler,
                 &self.state_pipeline,
                 &params,
+                self.frame_time,
             );
 
             if needs_reconfigure {

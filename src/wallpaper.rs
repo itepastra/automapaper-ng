@@ -9,7 +9,10 @@ use smithay_client_toolkit::{
         WaylandSurface,
     },
 };
-use std::ptr::NonNull;
+use std::{
+    ptr::NonNull,
+    time::{Duration, Instant},
+};
 use wayland_client::{
     protocol::{wl_output, wl_surface},
     Connection, Proxy, QueueHandle,
@@ -79,6 +82,9 @@ pub struct Wallpaper {
     state_b_bind_group: wgpu::BindGroup,
 
     read_state: ReadState,
+
+    prev: Instant,
+    accumulated_time: Duration,
 }
 
 impl Wallpaper {
@@ -200,6 +206,8 @@ impl Wallpaper {
             state_a_bind_group,
             state_b_bind_group,
             read_state: ReadState::StateA,
+            prev: Instant::now(),
+            accumulated_time: Duration::from_secs(0),
         }
     }
 
@@ -281,7 +289,16 @@ impl Wallpaper {
         _state_sampler: &wgpu::Sampler,
         state_pipeline: &wgpu::RenderPipeline,
         params: &Params,
+        frame_time: Duration,
     ) -> bool {
+        let now = Instant::now();
+        self.accumulated_time += now - self.prev;
+        self.prev = now;
+        if self.accumulated_time < frame_time {
+            return false;
+        }
+        self.accumulated_time -= frame_time;
+
         let mut params = *params;
         params.resolution = [self.width as f32, self.height as f32];
         queue.write_buffer(uniform_buf, 0, bytemuck::bytes_of(&params));
