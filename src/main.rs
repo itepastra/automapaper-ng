@@ -24,7 +24,7 @@ mod wallpaper;
 enum AppCommand {
     Set {
         name: String,
-        value: uniform::UniformValue,
+        value: uniform::ColorValue,
     },
     DisplayShader {
         fragment_glsl: String,

@@ -8,14 +8,14 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{uniform::UniformValue, AppCommand};
+use crate::{uniform::ColorValue, AppCommand};
 
 pub const SOCKET_NAME: &str = "automapaper-ng.sock";
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub(crate) enum IpcRequest {
-    Set { name: String, value: UniformValue },
+    Set { name: String, value: ColorValue },
     DisplayShader { fragment_glsl: String },
     StateShader { fragment_glsl: String },
     Get { name: String },

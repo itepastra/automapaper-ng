@@ -7,17 +7,17 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::uniform::UniformValue;
+use crate::uniform::ColorValue;
 
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     state_shader_path: PathBuf,
     display_shader_path: PathBuf,
 
-    pub c1: UniformValue,
-    pub c2: UniformValue,
-    pub c3: UniformValue,
-    pub c4: UniformValue,
+    pub c1: ColorValue,
+    pub c2: ColorValue,
+    pub c3: ColorValue,
+    pub c4: ColorValue,
 
     pub state_shrink_h: u32,
     pub state_shrink_v: u32,
@@ -51,10 +51,10 @@ impl Default for Config {
             state_shader_path: PathBuf::from("./state.glsl"),
             display_shader_path: PathBuf::from("./display.glsl"),
 
-            c1: UniformValue::ColorRgb([0., 0., 0.]),
-            c2: UniformValue::ColorRgb([0., 1., 0.]),
-            c3: UniformValue::ColorRgb([0., 0., 1.]),
-            c4: UniformValue::ColorRgb([1., 1., 1.]),
+            c1: ColorValue::ColorRgb([0., 0., 0.]),
+            c2: ColorValue::ColorRgb([0., 1., 0.]),
+            c3: ColorValue::ColorRgb([0., 0., 1.]),
+            c4: ColorValue::ColorRgb([1., 1., 1.]),
 
             state_shrink_h: 10,
             state_shrink_v: 10,

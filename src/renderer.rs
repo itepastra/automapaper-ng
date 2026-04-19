@@ -28,31 +28,21 @@ use wayland_client::{
     protocol::{wl_output, wl_surface},
     Connection, Proxy, QueueHandle,
 };
-
-use crate::{
-    config::Config, ipc::socket_path, uniform::UniformValue, wallpaper::Wallpaper, AppCommand,
-    Params, UniformState,
+use wgpu::{
+    Adapter, BackendOptions, Backends, BufferDescriptor, BufferUsages, DeviceDescriptor,
+    ExperimentalFeatures, Features, Instance, InstanceDescriptor, InstanceFlags, Limits,
+    MemoryBudgetThresholds, RequestAdapterOptions, Trace,
 };
 
-const VERT_GLSL: &str = r#"
-#version 450
+use crate::{
+    config::Config,
+    ipc::socket_path,
+    uniform::ColorValue,
+    wallpaper::{self, create_state_pipeline, Wallpaper},
+    AppCommand, Params, UniformState,
+};
 
-layout(location = 0) out vec2 v_uv;
-
-vec2 positions[3] = vec2[](
-    vec2(-1.0, -3.0),
-    vec2(-1.0,  1.0),
-    vec2( 3.0,  1.0)
-);
-
-void main() {
-    vec2 p = positions[gl_VertexIndex];
-    v_uv = 0.5 * (p + vec2(1.0));
-    gl_Position = vec4(p, 0.0, 1.0);
-}
-"#;
-
-const STATE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+pub const STATE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
     let conn = Connection::connect_to_env().expect("failed to connect to Wayland");
@@ -60,81 +50,36 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
     let qh = event_queue.handle();
 
     let compositor = CompositorState::bind(&globals, &qh).expect("wl_compositor unavailable");
-    let layer_shell = LayerShell::bind(&globals, &qh).expect("layer shell unavailable");
+    let layer_shell = LayerShell::bind(&globals, &qh).expect("layer_shell unavailable");
 
-    let wl_surface = compositor.create_surface(&qh);
-    let layer = layer_shell.create_layer_surface(
-        &qh,
-        wl_surface,
-        Layer::Background,
-        Some("wgpu-layer"),
-        None,
-    );
-
-    layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
-    layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-    layer.set_exclusive_zone(-1);
-    layer.set_size(0, 0);
-    layer.commit();
-
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::all(),
-        flags: wgpu::InstanceFlags::default(),
-        memory_budget_thresholds: Default::default(),
-        backend_options: Default::default(),
+    let instance = Instance::new(InstanceDescriptor {
+        backends: Backends::all(),
+        flags: InstanceFlags::default(),
+        memory_budget_thresholds: MemoryBudgetThresholds::default(),
+        backend_options: BackendOptions::default(),
         display: None,
     });
 
-    let raw_display_handle = RawDisplayHandle::Wayland(WaylandDisplayHandle::new(
-        NonNull::new(conn.backend().display_ptr() as *mut _).unwrap(),
-    ));
-    let raw_window_handle = RawWindowHandle::Wayland(WaylandWindowHandle::new(
-        NonNull::new(layer.wl_surface().id().as_ptr() as *mut _).unwrap(),
-    ));
-
-    let surface = unsafe {
-        instance
-            .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
-                raw_display_handle: Some(raw_display_handle),
-                raw_window_handle,
-            })
-            .expect("failed to create wgpu surface")
-    };
-
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        compatible_surface: Some(&surface),
+    let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
+        compatible_surface: None,
         ..Default::default()
     }))
-    .expect("failed to get adapter");
+    .expect("Failed to get adapter");
 
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+    let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor {
         label: Some("device"),
-        required_features: wgpu::Features::empty(),
-        required_limits: wgpu::Limits::default(),
-        memory_hints: wgpu::MemoryHints::default(),
-        trace: wgpu::Trace::Off,
-        experimental_features: wgpu::ExperimentalFeatures::disabled(),
+        required_features: Features::empty(),
+        required_limits: Limits::default(),
+        memory_hints: wgpu::MemoryHints::MemoryUsage,
+        trace: Trace::Off,
+        experimental_features: ExperimentalFeatures::disabled(),
     }))
     .expect("failed to request device");
 
-    let caps = surface.get_capabilities(&adapter);
-    let surface_format = caps
-        .formats
-        .iter()
-        .copied()
-        .find(|f| f.is_srgb())
-        .unwrap_or(caps.formats[0]);
-
-    let present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
-        wgpu::PresentMode::Mailbox
-    } else {
-        wgpu::PresentMode::Fifo
-    };
-
-    let uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("params uniform"),
+    let uniform_buf = device.create_buffer(&BufferDescriptor {
+        label: Some("param uniforms"),
         size: std::mem::size_of::<Params>() as u64,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
 
@@ -147,82 +92,43 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
     let pipeline_layout = create_pipeline_layout(&device, &bind_group_layout);
     let state_sampler = create_state_sampler(&device);
 
-    let disp_width = 1920;
-    let disp_height = 1080;
-    let state_width = disp_width / config.state_shrink_h;
-    let state_height = disp_height / config.state_shrink_v;
+    let state_pipeline = create_state_pipeline(&device, &pipeline_layout, &state_shader);
 
-    let (state_a, state_a_view) =
-        create_state_texture(&device, state_width, state_height, "state a");
-    let (state_b, state_b_view) =
-        create_state_texture(&device, state_width, state_height, "state b");
-
-    randomize_state_texture(&queue, &state_a, state_width, state_height);
-    randomize_state_texture(&queue, &state_b, state_width, state_height);
-
-    let state_pipeline = create_render_pipeline(
-        &device,
-        STATE_FORMAT,
-        &pipeline_layout,
-        &state_shader,
-        "state pipeline",
-    );
-
-    let display_pipeline = create_render_pipeline(
-        &device,
-        surface_format,
-        &pipeline_layout,
-        &display_shader,
-        "display pipeline",
-    );
+    let uniforms = UniformState {
+        c1: config.c1.into(),
+        c2: config.c2.into(),
+        c3: config.c3.into(),
+        c4: config.c4.into(),
+        ..Default::default()
+    };
 
     let mut app = App {
         registry_state: RegistryState::new(&globals),
         output_state: OutputState::new(&globals, &qh),
 
-        layer,
-        exit: false,
-        configured: false,
-        needs_reconfigure: true,
-        width: disp_width,
-        height: disp_height,
-        state_shrink_h: config.state_shrink_h,
-        state_shrink_v: config.state_shrink_v,
+        conn,
+        compositor,
+        layer_shell,
+        instance,
 
-        surface,
         device,
         queue,
-        surface_format,
-        present_mode,
-        alpha_mode: caps.alpha_modes[0],
 
         bind_group_layout,
         pipeline_layout,
-
         state_pipeline,
-        display_pipeline,
-
         uniform_buf,
         state_sampler,
 
-        state_a,
-        state_a_view,
-        state_b,
-        state_b_view,
-
-        read_state: ReadState::StateA,
-        start: Instant::now(),
-
-        uniforms: UniformState {
-            c1: config.c1.into(),
-            c2: config.c2.into(),
-            c3: config.c3.into(),
-            c4: config.c4.into(),
-            ..Default::default()
-        },
+        shrink_horizontal: config.state_shrink_h,
+        shrink_vertical: config.state_shrink_v,
+        uniforms,
         state_shader_source: state_shader,
         display_shader_source: display_shader,
         command_rx: rx,
+        start: Instant::now(),
+        wallpapers: Vec::new(),
+        exit: false,
     };
 
     while !app.exit {
@@ -232,7 +138,6 @@ pub fn run_renderer(rx: Receiver<AppCommand>, config: Config) {
     }
 
     let _ = fs::remove_file(socket_path());
-    drop(app.surface);
 }
 
 enum ReadState {
@@ -240,280 +145,111 @@ enum ReadState {
     StateB,
 }
 
-struct App {
+pub struct App {
     // Shared
     registry_state: RegistryState,
     output_state: OutputState,
+
+    conn: Connection,
+    compositor: CompositorState,
+    layer_shell: LayerShell,
+    instance: Instance,
+
     device: wgpu::Device,
     queue: wgpu::Queue,
-    surface_format: wgpu::TextureFormat,
-    present_mode: wgpu::PresentMode,
-    alpha_mode: wgpu::CompositeAlphaMode,
+
     bind_group_layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
-
     state_pipeline: wgpu::RenderPipeline,
-    display_pipeline: wgpu::RenderPipeline,
-
     uniform_buf: wgpu::Buffer,
     state_sampler: wgpu::Sampler,
 
-    exit: bool,
-    configured: bool,
-    needs_reconfigure: bool,
-    state_shrink_h: u32,
-    state_shrink_v: u32,
-
+    shrink_horizontal: u32,
+    shrink_vertical: u32,
+    uniforms: UniformState,
     state_shader_source: String,
     display_shader_source: String,
-
-    start: Instant,
-    uniforms: UniformState,
     command_rx: mpsc::Receiver<AppCommand>,
+    start: Instant,
 
     wallpapers: Vec<Wallpaper>,
-    // per monitor
-    layer: LayerSurface,
-    surface: wgpu::Surface<'static>,
-    width: u32,
-    height: u32,
-
-    state_a: wgpu::Texture,
-    state_a_view: wgpu::TextureView,
-    state_b: wgpu::Texture,
-    state_b_view: wgpu::TextureView,
-
-    read_state: ReadState,
+    exit: bool,
 }
 
 impl App {
-    fn reconfigure(&mut self) {
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: self.surface_format,
-            width: self.width.max(1),
-            height: self.height.max(1),
-            present_mode: self.present_mode,
-            alpha_mode: self.alpha_mode,
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
-        };
-
-        self.surface.configure(&self.device, &config);
-
-        let state_width = self.width / self.state_shrink_h;
-        let state_height = self.height / self.state_shrink_v;
-
-        let (state_a, state_a_view) =
-            create_state_texture(&self.device, state_width, state_height, "state a");
-        let (state_b, state_b_view) =
-            create_state_texture(&self.device, state_width, state_height, "state b");
-
-        randomize_state_texture(&self.queue, &state_a, state_width, state_height);
-        randomize_state_texture(&self.queue, &state_b, state_width, state_height);
-
-        self.state_a = state_a;
-        self.state_a_view = state_a_view;
-        self.state_b = state_b;
-        self.state_b_view = state_b_view;
-        self.read_state = ReadState::StateA;
-    }
-
-    fn handle_pending_commands(&mut self) {
-        while let Ok(cmd) = self.command_rx.try_recv() {
-            match cmd {
-                AppCommand::Set { name, value } => {
-                    if let Err(msg) = self.apply_uniform_update(&name, value) {
-                        eprintln!("uniform update failed: {msg}");
-                    }
-                }
-                AppCommand::DisplayShader { fragment_glsl } => {
-                    self.display_shader_source = fragment_glsl;
-                    self.display_pipeline = create_render_pipeline(
-                        &self.device,
-                        self.surface_format,
-                        &self.pipeline_layout,
-                        &self.display_shader_source,
-                        "display shader",
-                    );
-                }
-                AppCommand::StateShader { fragment_glsl } => {
-                    self.state_shader_source = fragment_glsl;
-                    self.state_pipeline = create_render_pipeline(
-                        &self.device,
-                        self.surface_format,
-                        &self.pipeline_layout,
-                        &self.state_shader_source,
-                        "state shader",
-                    )
-                }
-            }
-        }
-    }
-
-    fn apply_uniform_update(&mut self, name: &str, value: UniformValue) -> Result<(), String> {
-        match (name, value) {
-            ("c1", UniformValue::ColorRgb([r, g, b])) => {
-                self.uniforms.c1 = [r, g, b, 1.0];
-                Ok(())
-            }
-            ("c2", UniformValue::ColorRgb([r, g, b])) => {
-                self.uniforms.c2 = [r, g, b, 1.0];
-                Ok(())
-            }
-            ("c3", UniformValue::ColorRgb([r, g, b])) => {
-                self.uniforms.c3 = [r, g, b, 1.0];
-                Ok(())
-            }
-            ("c4", UniformValue::ColorRgb([r, g, b])) => {
-                self.uniforms.c4 = [r, g, b, 1.0];
-                Ok(())
-            }
-            ("time_scale", UniformValue::Float(v)) => {
-                self.uniforms.time_scale = v;
-                Ok(())
-            }
-            _ => Err(format!("unsupported assignment: {name}")),
-        }
-    }
-
-    fn draw(&mut self, qh: &QueueHandle<Self>) {
-        if !self.configured {
-            return;
-        }
-
-        self.handle_pending_commands();
-
-        let params = Params {
-            resolution: [self.width as f32, self.height as f32],
+    fn make_params(&self) -> Params {
+        Params {
+            resolution: [1., 1.],
             time: self.start.elapsed().as_secs_f32(),
             time_scale: self.uniforms.time_scale,
             c1: self.uniforms.c1,
             c2: self.uniforms.c2,
             c3: self.uniforms.c3,
             c4: self.uniforms.c4,
-        };
+        }
+    }
 
-        self.queue
-            .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&params));
+    fn apply_color_update(&mut self, name: &str, value: ColorValue) -> Result<(), String> {
+        match name {
+            "c1" => self.uniforms.c1 = value.into(),
+            "c2" => self.uniforms.c2 = value.into(),
+            "c3" => self.uniforms.c3 = value.into(),
+            "c4" => self.uniforms.c4 = value.into(),
 
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame) => frame,
-            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
-                self.needs_reconfigure = true;
-                frame
+            _ => return Err(format!("unsupported assignment: {name}")),
+        }
+        Ok(())
+    }
+
+    fn handle_pending_commands(&mut self) {
+        while let Ok(cmd) = self.command_rx.try_recv() {
+            match cmd {
+                AppCommand::Set { name, value } => {
+                    if let Err(msg) = self.apply_color_update(&name, value) {
+                        eprintln!("uniform update failed: {msg}")
+                    }
+                }
+                AppCommand::DisplayShader { fragment_glsl } => todo!(),
+                AppCommand::StateShader { fragment_glsl } => todo!(),
             }
-            wgpu::CurrentSurfaceTexture::Outdated => {
-                self.reconfigure();
-                return;
-            }
-            wgpu::CurrentSurfaceTexture::Lost => {
-                self.reconfigure();
-                return;
-            }
-            wgpu::CurrentSurfaceTexture::Timeout => return,
-            wgpu::CurrentSurfaceTexture::Occluded => return,
-            wgpu::CurrentSurfaceTexture::Validation => {
-                eprintln!("surface validation error");
-                return;
-            }
-        };
+        }
+    }
 
-        let surface_view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+    fn wallpaper_index_by_surface(&self, surface: &wl_surface::WlSurface) -> Option<usize> {
+        self.wallpapers
+            .iter()
+            .position(|w| w.wl_surface() == surface)
+    }
 
-        let (read_view, write_view) = match self.read_state {
-            ReadState::StateA => (&self.state_a_view, &self.state_b_view),
-            ReadState::StateB => (&self.state_b_view, &self.state_a_view),
-        };
+    fn wallpaper_index_by_layer(&self, layer: &LayerSurface) -> Option<usize> {
+        self.wallpapers.iter().position(|w| w.layer() == layer)
+    }
 
-        let read_bind_group = create_bind_group(
+    fn create_wallpaper_for_output(&mut self, qh: &QueueHandle<Self>, output: wl_output::WlOutput) {
+        if self.wallpapers.iter().any(|w| w.output() == &output) {
+            return;
+        }
+
+        let wallpaper = Wallpaper::new(
+            &self.conn,
+            qh,
+            &self.instance,
             &self.device,
+            &self.queue,
+            &self.compositor,
+            &self.layer_shell,
+            output,
             &self.bind_group_layout,
+            &self.pipeline_layout,
             &self.uniform_buf,
-            read_view,
             &self.state_sampler,
-            "read_bind_group",
+            &self.state_pipeline,
+            &self.display_shader_source,
+            self.shrink_horizontal,
+            self.shrink_vertical,
         );
 
-        let write_bind_group = create_bind_group(
-            &self.device,
-            &self.bind_group_layout,
-            &self.uniform_buf,
-            write_view,
-            &self.state_sampler,
-            "write_bind_group",
-        );
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("main encoder"),
-            });
-
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("state pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: write_view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                occlusion_query_set: None,
-                timestamp_writes: None,
-                multiview_mask: None,
-            });
-
-            pass.set_pipeline(&self.state_pipeline);
-            pass.set_bind_group(0, &read_bind_group, &[]);
-            pass.draw(0..3, 0..1);
-        }
-
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("display pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &surface_view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                occlusion_query_set: None,
-                timestamp_writes: None,
-                multiview_mask: None,
-            });
-
-            pass.set_pipeline(&self.display_pipeline);
-            pass.set_bind_group(0, &write_bind_group, &[]);
-            pass.draw(0..3, 0..1);
-        }
-
-        self.queue.submit([encoder.finish()]);
-        frame.present();
-
-        self.read_state = match self.read_state {
-            ReadState::StateA => ReadState::StateB,
-            ReadState::StateB => ReadState::StateA,
-        };
-
-        if self.needs_reconfigure {
-            self.reconfigure();
-            self.needs_reconfigure = false;
-        }
-
-        self.layer
-            .wl_surface()
-            .frame(qh, self.layer.wl_surface().clone());
+        self.wallpapers.push(wallpaper);
     }
 }
 
@@ -575,58 +311,6 @@ fn create_pipeline_layout(
     })
 }
 
-fn create_render_pipeline(
-    device: &wgpu::Device,
-    target_format: wgpu::TextureFormat,
-    pipeline_layout: &wgpu::PipelineLayout,
-    fragment_glsl: &str,
-    label: &str,
-) -> wgpu::RenderPipeline {
-    let vs = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("vertex shader"),
-        source: wgpu::ShaderSource::Glsl {
-            shader: VERT_GLSL.into(),
-            stage: wgpu::naga::ShaderStage::Vertex,
-            defines: Default::default(),
-        },
-    });
-
-    let fs = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some(label),
-        source: wgpu::ShaderSource::Glsl {
-            shader: fragment_glsl.into(),
-            stage: wgpu::naga::ShaderStage::Fragment,
-            defines: Default::default(),
-        },
-    });
-
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some(label),
-        layout: Some(pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &vs,
-            entry_point: Some("main"),
-            buffers: &[],
-            compilation_options: Default::default(),
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &fs,
-            entry_point: Some("main"),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: target_format,
-                blend: Some(wgpu::BlendState::REPLACE),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-            compilation_options: Default::default(),
-        }),
-        primitive: wgpu::PrimitiveState::default(),
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        multiview_mask: None,
-        cache: None,
-    })
-}
-
 impl CompositorHandler for App {
     fn scale_factor_changed(
         &mut self,
@@ -653,8 +337,34 @@ impl CompositorHandler for App {
         surface: &wl_surface::WlSurface,
         _time: u32,
     ) {
-        if surface == self.layer.wl_surface() {
-            self.draw(qh);
+        self.handle_pending_commands();
+
+        let params = self.make_params();
+
+        if let Some(i) = self.wallpaper_index_by_surface(surface) {
+            let wallpaper = &mut self.wallpapers[i];
+
+            let needs_reconfigure = wallpaper.draw(
+                &self.device,
+                &self.queue,
+                &self.bind_group_layout,
+                &self.uniform_buf,
+                &self.state_sampler,
+                &self.state_pipeline,
+                &params,
+            );
+
+            if needs_reconfigure {
+                wallpaper.reconfigure(
+                    &self.device,
+                    &self.queue,
+                    &self.bind_group_layout,
+                    &self.uniform_buf,
+                    &self.state_sampler,
+                );
+            }
+
+            wallpaper.request_frame(qh);
         }
     }
 
@@ -686,22 +396,51 @@ impl LayerShellHandler for App {
         &mut self,
         _conn: &Connection,
         qh: &QueueHandle<Self>,
-        _layer: &LayerSurface,
+        layer: &LayerSurface,
         configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
-        self.width = NonZeroU32::new(configure.new_size.0).map_or(256, NonZeroU32::get);
-        self.height = NonZeroU32::new(configure.new_size.1).map_or(256, NonZeroU32::get);
+        self.handle_pending_commands();
+        let params = &self.make_params();
 
-        self.reconfigure();
-        self.configured = true;
-        self.needs_reconfigure = false;
+        if let Some(i) = self.wallpaper_index_by_layer(layer) {
+            let wallpaper = &mut self.wallpapers[i];
 
-        self.layer
-            .wl_surface()
-            .frame(qh, self.layer.wl_surface().clone());
+            wallpaper.set_size(
+                NonZeroU32::new(configure.new_size.0).map_or(256, NonZeroU32::get),
+                NonZeroU32::new(configure.new_size.1).map_or(256, NonZeroU32::get),
+            );
 
-        self.draw(qh);
+            wallpaper.reconfigure(
+                &self.device,
+                &self.queue,
+                &self.bind_group_layout,
+                &self.uniform_buf,
+                &self.state_sampler,
+            );
+
+            wallpaper.request_frame(qh);
+
+            let needs_reconfigure = wallpaper.draw(
+                &self.device,
+                &self.queue,
+                &self.bind_group_layout,
+                &self.uniform_buf,
+                &self.state_sampler,
+                &self.state_pipeline,
+                &params,
+            );
+
+            if needs_reconfigure {
+                wallpaper.reconfigure(
+                    &self.device,
+                    &self.queue,
+                    &self.bind_group_layout,
+                    &self.uniform_buf,
+                    &self.state_sampler,
+                );
+            }
+        }
     }
 }
 
@@ -713,9 +452,10 @@ impl OutputHandler for App {
     fn new_output(
         &mut self,
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _output: wl_output::WlOutput,
+        qh: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
     ) {
+        self.create_wallpaper_for_output(qh, output);
     }
 
     fn update_output(
@@ -730,8 +470,9 @@ impl OutputHandler for App {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _output: wl_output::WlOutput,
+        output: wl_output::WlOutput,
     ) {
+        self.wallpapers.retain(|w| w.output() != &output);
     }
 }
 
