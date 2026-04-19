@@ -46,6 +46,10 @@
             pkgs.libiconv
           ];
 
+          meta = {
+            mainProgram = "automapaper-ng";
+          };
+
           # Additional environment variables can be set directly
           # MY_CUSTOM_VAR = "some value";
         };
