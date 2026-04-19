@@ -1,7 +1,39 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "value")]
+impl<'de> Deserialize<'de> for ColorValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        parse_uniform_value(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serialize for ColorValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            &ColorValue::ColorRgb([r, g, b]) => serializer.collect_str(&format!(
+                "{:02x}{:02x}{:02x}",
+                (r.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (g.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (b.clamp(0.0, 1.0) * 255.0).round() as u8,
+            )),
+            &ColorValue::ColorRgba([r, g, b, a]) => serializer.collect_str(&format!(
+                "{:02x}{:02x}{:02x}{:02x}",
+                (r.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (g.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (b.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (a.clamp(0.0, 1.0) * 255.0).round() as u8,
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum ColorValue {
     ColorRgb([f32; 3]),
     ColorRgba([f32; 4]),

@@ -10,9 +10,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::uniform::ColorValue;
 
+fn state_shader_default() -> PathBuf {
+    PathBuf::from("./state.glsl")
+}
+fn display_shader_default() -> PathBuf {
+    PathBuf::from("./display.glsl")
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default = "state_shader_default")]
     state_shader_path: PathBuf,
+    #[serde(default = "display_shader_default")]
     display_shader_path: PathBuf,
 
     pub c1: ColorValue,
